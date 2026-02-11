@@ -123,9 +123,37 @@
 
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 1rem;
             margin-bottom: 2rem;
+        }
+
+        .reroll-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            border: 1px solid #e8a838;
+            background: color-mix(in srgb, #e8a838 10%, #1a1d29);
+            color: #e8a838;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .reroll-btn:hover {
+            background: color-mix(in srgb, #e8a838 20%, #1a1d29);
+        }
+
+        .reroll-btn .dice {
+            font-size: 1rem;
+            transition: transform 0.3s;
+        }
+
+        .reroll-btn:active .dice {
+            transform: rotate(180deg);
         }
 
         .stat-card {
@@ -157,9 +185,11 @@
         .stat-card.sp500 .value { color: #5b8def; }
         .stat-card.best .value { color: #4ecb71; }
         .stat-card.worst .value { color: #ef5b5b; }
+        .stat-card.random .value { color: #e8a838; }
         .stat-card.sp500 .subvalue { color: #5b8def; }
         .stat-card.best .subvalue { color: #4ecb71; }
         .stat-card.worst .subvalue { color: #ef5b5b; }
+        .stat-card.random .subvalue { color: #e8a838; }
 
         footer {
             text-align: center;
@@ -209,6 +239,10 @@
 
         .note strong { color: #e0e0e0; }
 
+        @media (max-width: 900px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
         @media (max-width: 768px) {
             h1 { font-size: 1.3rem; }
             .stats-grid { grid-template-columns: 1fr; }
@@ -244,8 +278,14 @@
                 <button class="toggle-btn active" data-series="worst" style="--series-color: #ef5b5b;">
                     <span class="dot"></span> Worst Stock
                 </button>
+                <button class="toggle-btn active" data-series="random" style="--series-color: #e8a838;">
+                    <span class="dot"></span> Random Pick
+                </button>
             </div>
 
+            <button class="reroll-btn" id="rerollBtn" title="Generate a new random stock-picking sequence">
+                <span class="dice">&#x1F3B2;</span> Re-roll
+            </button>
         </div>
 
         <div id="chart">
@@ -271,15 +311,21 @@
                 <div class="value" id="stat-worst">—</div>
                 <div class="subvalue" id="stat-worst-return"></div>
             </div>
+            <div class="stat-card random">
+                <div class="label">Random Stock Each Day</div>
+                <div class="value" id="stat-random">—</div>
+                <div class="subvalue" id="stat-random-return"></div>
+            </div>
         </div>
 
         <div class="note">
             <strong>How to read this:</strong> The "Best Stock" line shows what would happen if you
             had a crystal ball and invested your entire portfolio in whichever single S&P 500 stock
             had the highest return that day — every single trading day. The "Worst Stock" line is
-            the opposite: always picking the single worst performer. This is purely hypothetical and
-            impossible in practice, but it illustrates the extreme range of outcomes hidden inside
-            index returns.<br><br>
+            the opposite: always picking the single worst performer. The "Random Pick" line
+            simulates picking a random stock each day — hit Re-roll to generate a new random
+            sequence and see how outcomes vary. All are purely hypothetical, but they illustrate
+            the extreme range of outcomes hidden inside index returns.<br><br>
             <strong>Caveats:</strong> Uses current S&P 500 constituents applied historically
             (survivorship bias). No transaction costs. Dividends are included via adjusted prices.
             Past performance does not predict future results.
@@ -297,13 +343,65 @@
             sp500: '#5b8def',
             best: '#4ecb71',
             worst: '#ef5b5b',
+            random: '#e8a838',
             grid: '#1e2130',
             bg: '#0f1117',
             text: '#8b8fa3',
         };
 
         let rawData = null;
-        let visibleSeries = { sp500: true, best: true, worst: true };
+        let visibleSeries = { sp500: true, best: true, worst: true, random: true };
+        let randomSeed = Math.floor(Math.random() * 2147483647);
+
+        // Seeded PRNG (mulberry32)
+        function mulberry32(seed) {
+            return function() {
+                seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+                let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+                t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            };
+        }
+
+        // Box-Muller transform for normal distribution from seeded PRNG
+        function normalRandom(rng) {
+            let u1 = rng(), u2 = rng();
+            while (u1 === 0) u1 = rng();
+            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        }
+
+        // Generate random daily picks for the full raw dataset.
+        // For each day, sample a return from Normal(sp_return, sigma)
+        // clamped to [worst_return, best_return].
+        // Returns an array of log10(1 + return) for each day.
+        function generateRandomReturnsLog10(data, seed) {
+            const rng = mulberry32(seed);
+            const logReturns = new Array(data.length);
+
+            for (let i = 0; i < data.length; i++) {
+                const bestRet = data[i].br / 100;
+                const worstRet = data[i].wr / 100;
+
+                // Derive S&P daily return
+                let spRet = 0;
+                if (i > 0 && data[i - 1].sp > 0) {
+                    spRet = (data[i].sp / data[i - 1].sp) - 1;
+                }
+
+                // Sigma: individual stock vol is roughly the spread / 6
+                // (best and worst are ~3 sigma tails of 500 stocks)
+                const sigma = (bestRet - worstRet) / 6;
+                let ret = spRet + normalRandom(rng) * sigma;
+
+                // Clamp to [worst, best]
+                ret = Math.max(worstRet, Math.min(bestRet, ret));
+
+                // Protect against log of non-positive
+                if (ret <= -1) ret = -0.99;
+                logReturns[i] = Math.log10(1 + ret);
+            }
+            return logReturns;
+        }
 
         // Load data
         try {
@@ -329,27 +427,45 @@
         }
         startYearSelect.value = firstYear;
 
+        // Pre-compute random log returns for the full dataset (re-generated on re-roll).
+        // This is an array of log10(1 + daily_return) per day.
+        let randomDailyLog10 = generateRandomReturnsLog10(rawData.data, randomSeed);
+
         // Data uses log10 for best/worst (they compound to astronomical values).
-        // All three series are plotted on a unified log10 y-axis.
-        // S&P 500 values are real dollars; best/worst stored as log10(dollars).
+        // All series are plotted on a unified log10 y-axis.
+        // S&P 500 values are real dollars; best/worst/random stored as log10(dollars).
         function getFilteredData(startYear) {
             const cutoff = `${startYear}-01-01`;
             const startIdx = rawData.data.findIndex(d => d.d >= cutoff);
-            if (startIdx === -1) return rawData.data;
+            const idx = startIdx === -1 ? 0 : startIdx;
 
-            const slice = rawData.data.slice(startIdx);
+            const slice = rawData.data.slice(idx);
 
             // Rebase everything to $10,000 at the new start
             const baseSp = slice[0].sp;
-            const baseBl = slice[0].bl;  // log10 value
-            const baseWl = slice[0].wl;  // log10 value
-            const log10_10k = Math.log10(10000); // = 4
+            const baseBl = slice[0].bl;
+            const baseWl = slice[0].wl;
+            const log10_10k = 4; // Math.log10(10000)
 
-            return slice.map(d => ({
+            // Compute cumulative random log10 from the startIdx onward
+            const randomSliceLog = randomDailyLog10.slice(idx);
+            const randomCum = new Array(slice.length);
+            randomCum[0] = log10_10k + randomSliceLog[0];
+            for (let i = 1; i < slice.length; i++) {
+                randomCum[i] = randomCum[i - 1] + randomSliceLog[i];
+            }
+            // Rebase random to start at exactly $10,000
+            const randomBase = randomCum[0] - log10_10k;
+            for (let i = 0; i < randomCum.length; i++) {
+                randomCum[i] -= randomBase;
+            }
+
+            return slice.map((d, i) => ({
                 ...d,
                 sp: (d.sp / baseSp) * 10000,
-                bl: log10_10k + (d.bl - baseBl),  // rebase in log space
+                bl: log10_10k + (d.bl - baseBl),
                 wl: log10_10k + (d.wl - baseWl),
+                rl: randomCum[i],
             }));
         }
 
@@ -401,10 +517,12 @@
             document.getElementById('stat-sp500').textContent = formatDollars(last.sp);
             document.getElementById('stat-best').textContent = formatLog10Dollars(last.bl);
             document.getElementById('stat-worst').textContent = formatLog10Dollars(last.wl);
+            document.getElementById('stat-random').textContent = formatLog10Dollars(last.rl);
 
             document.getElementById('stat-sp500-return').textContent = formatSpReturn(last.sp);
             document.getElementById('stat-best-return').textContent = formatReturn(last.bl);
             document.getElementById('stat-worst-return').textContent = formatReturn(last.wl);
+            document.getElementById('stat-random-return').textContent = formatReturn(last.rl);
         }
 
         function buildChart(data) {
@@ -452,11 +570,25 @@
                 });
             }
 
+            if (visibleSeries.random) {
+                traces.push({
+                    x: dates,
+                    y: data.map(d => d.rl),
+                    name: 'Random Stock Each Day',
+                    type: 'scatter',
+                    mode: 'lines',
+                    line: { color: COLORS.random, width: 2.5 },
+                    customdata: data.map(d => [formatLog10Dollars(d.rl)]),
+                    hovertemplate: '<b>Random Pick</b><br>%{x}<br>Portfolio: %{customdata[0]}<extra></extra>',
+                });
+            }
+
             // Custom tick labels: show dollar values on the log10 axis
             const allY = [];
             if (visibleSeries.sp500) data.forEach(d => allY.push(Math.log10(d.sp)));
             if (visibleSeries.best) data.forEach(d => allY.push(d.bl));
             if (visibleSeries.worst) data.forEach(d => allY.push(d.wl));
+            if (visibleSeries.random) data.forEach(d => allY.push(d.rl));
 
             const yMin = Math.floor(Math.min(...allY)) - 1;
             const yMax = Math.ceil(Math.max(...allY)) + 1;
@@ -551,6 +683,12 @@
                 btn.classList.toggle('active');
                 render();
             });
+        });
+
+        document.getElementById('rerollBtn').addEventListener('click', () => {
+            randomSeed = Math.floor(Math.random() * 2147483647);
+            randomDailyLog10 = generateRandomReturnsLog10(rawData.data, randomSeed);
+            render();
         });
 
         // Initial render
