@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S&P 500 Stock Picker — What If You Always Picked the Best (or Worst) Stock?</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+            background: #0f1117;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 0.5rem;
+            line-height: 1.3;
+        }
+
+        .subtitle {
+            font-size: 1rem;
+            color: #8b8fa3;
+            max-width: 700px;
+            margin: 0 auto;
+            line-height: 1.5;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .control-group label {
+            font-size: 0.85rem;
+            color: #8b8fa3;
+            font-weight: 500;
+        }
+
+        select, input[type="range"] {
+            background: #1a1d29;
+            border: 1px solid #2d3148;
+            color: #e0e0e0;
+            padding: 0.4rem 0.7rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+
+        select:hover, select:focus {
+            border-color: #5b6abf;
+            outline: none;
+        }
+
+        .toggle-group {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .toggle-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            border: 1px solid #2d3148;
+            background: #1a1d29;
+            color: #8b8fa3;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .toggle-btn.active {
+            border-color: var(--series-color);
+            color: var(--series-color);
+            background: color-mix(in srgb, var(--series-color) 10%, #1a1d29);
+        }
+
+        .toggle-btn .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--series-color);
+            opacity: 0.4;
+            transition: opacity 0.2s;
+        }
+
+        .toggle-btn.active .dot { opacity: 1; }
+
+#chart {
+            width: 100%;
+            height: 550px;
+            margin-bottom: 2rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: #1a1d29;
+            border: 1px solid #2d3148;
+            border-radius: 10px;
+            padding: 1.2rem;
+            text-align: center;
+        }
+
+        .stat-card .label {
+            font-size: 0.8rem;
+            color: #8b8fa3;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-card .value {
+            font-size: 1.6rem;
+            font-weight: 700;
+        }
+
+        .stat-card .subvalue {
+            font-size: 0.85rem;
+            margin-top: 0.3rem;
+        }
+
+        .stat-card.sp500 .value { color: #5b8def; }
+        .stat-card.best .value { color: #4ecb71; }
+        .stat-card.worst .value { color: #ef5b5b; }
+        .stat-card.sp500 .subvalue { color: #5b8def; }
+        .stat-card.best .subvalue { color: #4ecb71; }
+        .stat-card.worst .subvalue { color: #ef5b5b; }
+
+        footer {
+            text-align: center;
+            padding: 1.5rem 0;
+            border-top: 1px solid #1e2130;
+            color: #555a70;
+            font-size: 0.8rem;
+            line-height: 1.6;
+        }
+
+        footer a {
+            color: #5b8def;
+            text-decoration: none;
+        }
+
+        .loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 400px;
+            color: #8b8fa3;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #2d3148;
+            border-top-color: #5b8def;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 1rem;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .note {
+            background: #1a1d29;
+            border: 1px solid #2d3148;
+            border-radius: 10px;
+            padding: 1rem 1.2rem;
+            margin-bottom: 2rem;
+            font-size: 0.85rem;
+            color: #8b8fa3;
+            line-height: 1.6;
+        }
+
+        .note strong { color: #e0e0e0; }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 1.3rem; }
+            .stats-grid { grid-template-columns: 1fr; }
+            #chart { height: 400px; }
+            .controls { gap: 0.75rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>What If You Always Picked the Best Stock in the S&P 500?</h1>
+            <p class="subtitle">
+                Starting with $10,000 — comparing buy-and-hold indexing against
+                a hypothetical "perfect picker" who buys the single best (or worst)
+                performing stock every trading day.
+            </p>
+        </header>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="startYear">Start year:</label>
+                <select id="startYear"></select>
+            </div>
+
+            <div class="toggle-group">
+                <button class="toggle-btn active" data-series="sp500" style="--series-color: #5b8def;">
+                    <span class="dot"></span> S&P 500
+                </button>
+                <button class="toggle-btn active" data-series="best" style="--series-color: #4ecb71;">
+                    <span class="dot"></span> Best Stock
+                </button>
+                <button class="toggle-btn active" data-series="worst" style="--series-color: #ef5b5b;">
+                    <span class="dot"></span> Worst Stock
+                </button>
+            </div>
+
+        </div>
+
+        <div id="chart">
+            <div class="loading">
+                <div class="spinner"></div>
+                <span>Loading market data...</span>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card sp500">
+                <div class="label">S&P 500 (Buy & Hold)</div>
+                <div class="value" id="stat-sp500">—</div>
+                <div class="subvalue" id="stat-sp500-return"></div>
+            </div>
+            <div class="stat-card best">
+                <div class="label">Best Stock Each Day</div>
+                <div class="value" id="stat-best">—</div>
+                <div class="subvalue" id="stat-best-return"></div>
+            </div>
+            <div class="stat-card worst">
+                <div class="label">Worst Stock Each Day</div>
+                <div class="value" id="stat-worst">—</div>
+                <div class="subvalue" id="stat-worst-return"></div>
+            </div>
+        </div>
+
+        <div class="note">
+            <strong>How to read this:</strong> The "Best Stock" line shows what would happen if you
+            had a crystal ball and invested your entire portfolio in whichever single S&P 500 stock
+            had the highest return that day — every single trading day. The "Worst Stock" line is
+            the opposite: always picking the single worst performer. This is purely hypothetical and
+            impossible in practice, but it illustrates the extreme range of outcomes hidden inside
+            index returns.<br><br>
+            <strong>Caveats:</strong> Uses current S&P 500 constituents applied historically
+            (survivorship bias). No transaction costs. Dividends are included via adjusted prices.
+            Past performance does not predict future results.
+        </div>
+
+        <footer>
+            Data sourced from Yahoo Finance via <a href="https://github.com/ranaroussi/yfinance">yfinance</a>.
+            Built by <a href="https://github.com/philipcondie">Philip Condie</a>.
+        </footer>
+    </div>
+
+    <script>
+    (async function() {
+        const COLORS = {
+            sp500: '#5b8def',
+            best: '#4ecb71',
+            worst: '#ef5b5b',
+            grid: '#1e2130',
+            bg: '#0f1117',
+            text: '#8b8fa3',
+        };
+
+        let rawData = null;
+        let visibleSeries = { sp500: true, best: true, worst: true };
+
+        // Load data
+        try {
+            const resp = await fetch('data/sp500_analysis.json');
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            rawData = await resp.json();
+        } catch (err) {
+            document.getElementById('chart').innerHTML =
+                `<div class="loading"><span>Failed to load data: ${err.message}</span></div>`;
+            return;
+        }
+
+        // Populate start year dropdown
+        const startYearSelect = document.getElementById('startYear');
+        const firstYear = parseInt(rawData.start_date.slice(0, 4));
+        const lastYear = parseInt(rawData.end_date.slice(0, 4));
+
+        for (let y = firstYear; y <= lastYear - 1; y++) {
+            const opt = document.createElement('option');
+            opt.value = y;
+            opt.textContent = y;
+            startYearSelect.appendChild(opt);
+        }
+        startYearSelect.value = firstYear;
+
+        // Data uses log10 for best/worst (they compound to astronomical values).
+        // All three series are plotted on a unified log10 y-axis.
+        // S&P 500 values are real dollars; best/worst stored as log10(dollars).
+        function getFilteredData(startYear) {
+            const cutoff = `${startYear}-01-01`;
+            const startIdx = rawData.data.findIndex(d => d.d >= cutoff);
+            if (startIdx === -1) return rawData.data;
+
+            const slice = rawData.data.slice(startIdx);
+
+            // Rebase everything to $10,000 at the new start
+            const baseSp = slice[0].sp;
+            const baseBl = slice[0].bl;  // log10 value
+            const baseWl = slice[0].wl;  // log10 value
+            const log10_10k = Math.log10(10000); // = 4
+
+            return slice.map(d => ({
+                ...d,
+                sp: (d.sp / baseSp) * 10000,
+                bl: log10_10k + (d.bl - baseBl),  // rebase in log space
+                wl: log10_10k + (d.wl - baseWl),
+            }));
+        }
+
+        // Format a log10 value as a readable dollar string
+        function formatLog10Dollars(log10val) {
+            if (log10val > 300) return '$10^' + Math.round(log10val);
+            if (log10val > 15) return '$10^' + log10val.toFixed(0);
+            // For small enough values, show actual dollars
+            const val = Math.pow(10, log10val);
+            return formatDollars(val);
+        }
+
+        function formatDollars(val) {
+            if (val >= 1e15) return '$' + (val / 1e15).toFixed(1) + ' quadrillion';
+            if (val >= 1e12) return '$' + (val / 1e12).toFixed(1) + ' trillion';
+            if (val >= 1e9) return '$' + (val / 1e9).toFixed(1) + 'B';
+            if (val >= 1e6) return '$' + (val / 1e6).toFixed(1) + 'M';
+            if (val >= 1e3) return '$' + (val / 1e3).toFixed(1) + 'K';
+            if (val >= 1) return '$' + val.toFixed(2);
+            if (val >= 0.01) return '$' + val.toFixed(4);
+            if (val > 0) return '$' + val.toExponential(1);
+            return '$0';
+        }
+
+        function formatReturn(log10val) {
+            // Return relative to $10,000 (log10 = 4)
+            const diff = log10val - 4;
+            if (Math.abs(diff) > 6) {
+                const sign = diff >= 0 ? '+' : '';
+                return sign + '10^' + diff.toFixed(0) + ' x';
+            }
+            const ratio = Math.pow(10, diff);
+            const pct = (ratio - 1) * 100;
+            const sign = pct >= 0 ? '+' : '';
+            if (Math.abs(pct) >= 1e6) return sign + (pct / 1e6).toFixed(1) + 'M%';
+            if (Math.abs(pct) >= 1e3) return sign + (pct / 1e3).toFixed(1) + 'K%';
+            return sign + pct.toFixed(1) + '%';
+        }
+
+        function formatSpReturn(val) {
+            const pct = ((val - 10000) / 10000) * 100;
+            const sign = pct >= 0 ? '+' : '';
+            return sign + pct.toFixed(1) + '%';
+        }
+
+        function updateStats(data) {
+            const last = data[data.length - 1];
+
+            document.getElementById('stat-sp500').textContent = formatDollars(last.sp);
+            document.getElementById('stat-best').textContent = formatLog10Dollars(last.bl);
+            document.getElementById('stat-worst').textContent = formatLog10Dollars(last.wl);
+
+            document.getElementById('stat-sp500-return').textContent = formatSpReturn(last.sp);
+            document.getElementById('stat-best-return').textContent = formatReturn(last.bl);
+            document.getElementById('stat-worst-return').textContent = formatReturn(last.wl);
+        }
+
+        function buildChart(data) {
+            const dates = data.map(d => d.d);
+
+            // Everything plotted in log10 space
+            const traces = [];
+
+            if (visibleSeries.sp500) {
+                traces.push({
+                    x: dates,
+                    y: data.map(d => Math.log10(d.sp)),
+                    name: 'S&P 500 Index',
+                    type: 'scatter',
+                    mode: 'lines',
+                    line: { color: COLORS.sp500, width: 2.5 },
+                    customdata: data.map(d => [formatDollars(d.sp)]),
+                    hovertemplate: '<b>S&P 500</b><br>%{x}<br>Portfolio: %{customdata[0]}<extra></extra>',
+                });
+            }
+
+            if (visibleSeries.best) {
+                traces.push({
+                    x: dates,
+                    y: data.map(d => d.bl),
+                    name: 'Best Stock Each Day',
+                    type: 'scatter',
+                    mode: 'lines',
+                    line: { color: COLORS.best, width: 2.5 },
+                    customdata: data.map(d => [formatLog10Dollars(d.bl), d.bt, d.br]),
+                    hovertemplate: '<b>Best Stock</b><br>%{x}<br>Portfolio: %{customdata[0]}<br>Today: %{customdata[1]} (+%{customdata[2]}%)<extra></extra>',
+                });
+            }
+
+            if (visibleSeries.worst) {
+                traces.push({
+                    x: dates,
+                    y: data.map(d => d.wl),
+                    name: 'Worst Stock Each Day',
+                    type: 'scatter',
+                    mode: 'lines',
+                    line: { color: COLORS.worst, width: 2.5 },
+                    customdata: data.map(d => [formatLog10Dollars(d.wl), d.wt, d.wr]),
+                    hovertemplate: '<b>Worst Stock</b><br>%{x}<br>Portfolio: %{customdata[0]}<br>Today: %{customdata[1]} (%{customdata[2]}%)<extra></extra>',
+                });
+            }
+
+            // Custom tick labels: show dollar values on the log10 axis
+            const allY = [];
+            if (visibleSeries.sp500) data.forEach(d => allY.push(Math.log10(d.sp)));
+            if (visibleSeries.best) data.forEach(d => allY.push(d.bl));
+            if (visibleSeries.worst) data.forEach(d => allY.push(d.wl));
+
+            const yMin = Math.floor(Math.min(...allY)) - 1;
+            const yMax = Math.ceil(Math.max(...allY)) + 1;
+
+            // Generate tick values every few powers of 10
+            const step = Math.max(1, Math.round((yMax - yMin) / 15));
+            const tickVals = [];
+            const tickText = [];
+            for (let v = yMin; v <= yMax; v += step) {
+                tickVals.push(v);
+                if (v >= -2 && v <= 15) {
+                    tickText.push(formatDollars(Math.pow(10, v)));
+                } else {
+                    tickText.push('$10^' + v);
+                }
+            }
+
+            const layout = {
+                paper_bgcolor: COLORS.bg,
+                plot_bgcolor: COLORS.bg,
+                font: { family: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif', color: COLORS.text },
+                margin: { t: 20, r: 30, b: 50, l: 80 },
+                xaxis: {
+                    gridcolor: COLORS.grid,
+                    linecolor: COLORS.grid,
+                    tickfont: { size: 11 },
+                },
+                yaxis: {
+                    gridcolor: COLORS.grid,
+                    linecolor: COLORS.grid,
+                    tickfont: { size: 11 },
+                    tickvals: tickVals,
+                    ticktext: tickText,
+                    title: { text: 'Portfolio Value (log scale)', font: { size: 12, color: COLORS.text } },
+                },
+                legend: {
+                    orientation: 'h',
+                    yanchor: 'bottom',
+                    y: 1.02,
+                    xanchor: 'center',
+                    x: 0.5,
+                    font: { size: 12 },
+                },
+                hovermode: 'x unified',
+                hoverlabel: {
+                    bgcolor: '#1a1d29',
+                    bordercolor: '#2d3148',
+                    font: { size: 12, color: '#e0e0e0' },
+                },
+                shapes: [{
+                    type: 'line',
+                    x0: dates[0], x1: dates[dates.length - 1],
+                    y0: 4, y1: 4,  // log10(10000) = 4
+                    line: { color: '#555a70', width: 1, dash: 'dot' },
+                }],
+                annotations: [{
+                    x: dates[0],
+                    y: 4,
+                    text: '$10,000 start',
+                    showarrow: false,
+                    font: { size: 10, color: '#555a70' },
+                    xanchor: 'left',
+                    yanchor: 'bottom',
+                    yshift: 4,
+                }],
+            };
+
+            const config = {
+                responsive: true,
+                displayModeBar: true,
+                modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'],
+                displaylogo: false,
+            };
+
+            Plotly.newPlot('chart', traces, layout, config);
+        }
+
+        function render() {
+            const year = parseInt(startYearSelect.value);
+            const data = getFilteredData(year);
+            updateStats(data);
+            buildChart(data);
+        }
+
+        // Event listeners
+        startYearSelect.addEventListener('change', render);
+
+        document.querySelectorAll('.toggle-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const series = btn.dataset.series;
+                visibleSeries[series] = !visibleSeries[series];
+                btn.classList.toggle('active');
+                render();
+            });
+        });
+
+        // Initial render
+        render();
+    })();
+    </script>
+</body>
+</html>
